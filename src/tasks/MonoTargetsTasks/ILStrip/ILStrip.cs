@@ -76,8 +76,17 @@ public class ILStrip : Microsoft.Build.Utilities.Task
 
         int allowedParallelism = DisableParallelStripping ? 1 : Math.Min(Assemblies.Length, Environment.ProcessorCount);
         IBuildEngine9? be9 = BuildEngine as IBuildEngine9;
-        if (be9 is not null)
-            allowedParallelism = be9.RequestCores(allowedParallelism);
+        try
+        {
+            if (be9 is not null)
+                allowedParallelism = be9.RequestCores(allowedParallelism);
+        }
+        catch(NotImplementedException)
+        {
+            // RequestCores is not implemented in TaskHostFactory
+            be9 = null;
+        }
+
         try
         {
             ParallelLoopResult result = Parallel.ForEach(Assemblies,
@@ -127,13 +136,14 @@ public class ILStrip : Microsoft.Build.Utilities.Task
 
         try
         {
-            if(!AssemblyStripper.AssemblyStripper.TryStripAssembly(assemblyFile, outputPath))
+            if (!AssemblyStripper.AssemblyStripper.TryStripAssembly(assemblyFile, outputPath))
             {
                 Log.LogMessage(MessageImportance.Low, $"[ILStrip] Skipping {assemblyFile} because it is not a managed assembly.");
             }
             else
             {
-                _processedAssemblies.GetOrAdd(assemblyItem.ItemSpec, GetTrimmedAssemblyItem(assemblyItem, outputPath, assemblyFile));
+                var fullPath = assemblyItem.GetMetadata("FullPath");
+                _processedAssemblies.GetOrAdd(fullPath, GetTrimmedAssemblyItem(assemblyItem, outputPath, assemblyFile));
             }
         }
         catch (Exception ex)
