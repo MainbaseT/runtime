@@ -24,14 +24,6 @@ struct DacHostVtPtrs
 #undef VPTR_CLASS
 };
 
-
-const WCHAR *g_dacVtStrings[] =
-{
-#define VPTR_CLASS(name) W(#name),
-#include <vptr_list.h>
-#undef VPTR_CLASS
-};
-
 DacHostVtPtrs g_dacHostVtPtrs;
 
 HRESULT
@@ -44,6 +36,13 @@ DacGetHostVtPtrs(void)
 
     return S_OK;
 }
+
+const WCHAR *g_dacFrameStrings[] =
+{
+#define FRAME_TYPE_NAME(name) W(#name),
+#include "FrameTypes.h"
+#undef FRAME_TYPE_NAME
+};
 
 bool
 DacExceptionFilter(Exception* ex, ClrDataAccess* access,
@@ -616,9 +615,10 @@ DacInstantiateClassByVTable(TADDR addr, ULONG32 minSize, bool throwEx)
     // Sanity check that the object we're returning is big enough to fill the PTR type it's being
     // accessed with.
     // If this is not true, it means the type being marshalled isn't a sub-type (or the same type)
-    // as the PTR type it's being used as.  For example, trying to marshal an instance of a SystemDomain
-    // object into a PTR_AppDomain will cause this ASSERT to fire (because both SystemDomain and AppDomain
-    // derived from BaseDomain, and SystemDomain is smaller than AppDomain).
+    // as the PTR type it's being used as. For example, trying to marshal an AssemblyLoaderAllocator
+    // into a PTR_GlobalLoaderAllocator will cause this ASSERT to fire (because AssemblyLoaderAllocator
+    // and GlobalLoaderAllocator derived from LoaderAllocator and AssemblyLoaderAllocator is smaller
+    // than GlobalLoaderAllocator).
     _ASSERTE_MSG(size >= minSize, "DAC coding error: Attempt to instantiate a VPTR from an object that is too small");
 
     inst = g_dacImpl->m_instances.Alloc(addr, size, DAC_VPTR);
@@ -1133,22 +1133,17 @@ DacGetTargetAddrForHostInteriorAddr(LPCVOID ptr, bool throwEx)
 #endif // !_PREFIX_
 }
 
-PWSTR    DacGetVtNameW(TADDR targetVtable)
+PWSTR    DacGetFrameNameW(TADDR frameIdentifier)
 {
     PWSTR pszRet = NULL;
 
-    TADDR *targ = &DacGlobalValues()->EEJitManager__vtAddr;
-    TADDR *targStart = targ;
-    for (ULONG i = 0; i < sizeof(g_dacHostVtPtrs) / sizeof(PVOID); i++)
-    {
-        if (targetVtable == (*targ))
-        {
-            pszRet = (PWSTR) *(g_dacVtStrings + (targ - targStart));
-            break;
-        }
+    FrameIdentifier frameId = static_cast<FrameIdentifier>(frameIdentifier);
 
-        targ++;
+    if (!(frameId == FrameIdentifier::None || frameId >= FrameIdentifier::CountPlusOne))
+    {
+        pszRet = (PWSTR) g_dacFrameStrings[(int)frameId - 1];
     }
+
     return pszRet;
 }
 
