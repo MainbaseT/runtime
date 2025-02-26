@@ -397,7 +397,7 @@ static void regenLog(unsigned codeDelta,
 
     if (logFile == NULL)
     {
-        logFile = fopen("regen.txt", "a");
+        logFile = fopen_utf8("regen.txt", "a");
         InitializeCriticalSection(&logFileLock);
     }
 
@@ -424,7 +424,7 @@ static void regenLog(unsigned encoding, InfoHdr* header, InfoHdr* state)
 {
     if (logFile == NULL)
     {
-        logFile = fopen("regen.txt", "a");
+        logFile = fopen_utf8("regen.txt", "a");
         InitializeCriticalSection(&logFileLock);
     }
 
@@ -1588,10 +1588,7 @@ size_t GCInfo::gcInfoBlockHdrSave(
         assert(header->revPInvokeOffset != INVALID_REV_PINVOKE_OFFSET);
     }
 
-    assert((compiler->compArgSize & 0x3) == 0);
-
-    size_t argCount =
-        (compiler->compArgSize - (compiler->codeGen->intRegState.rsCalleeRegArgCount * REGSIZE_BYTES)) / REGSIZE_BYTES;
+    size_t argCount = compiler->lvaParameterStackSize / REGSIZE_BYTES;
     assert(argCount <= MAX_USHORT_SIZE_T);
     header->argCount = static_cast<unsigned short>(argCount);
 
@@ -3709,15 +3706,6 @@ public:
         }
     }
 
-    void SetReturnKind(ReturnKind returnKind)
-    {
-        m_gcInfoEncoder->SetReturnKind(returnKind);
-        if (m_doLogging)
-        {
-            printf("Set ReturnKind to %s.\n", ReturnKindToString(returnKind));
-        }
-    }
-
     void SetStackBaseRegister(UINT32 registerNumber)
     {
         m_gcInfoEncoder->SetStackBaseRegister(registerNumber);
@@ -3786,7 +3774,7 @@ public:
             printf("Set WantsReportOnlyLeaf.\n");
         }
     }
-#elif defined(TARGET_ARMARCH)
+#elif defined(TARGET_ARMARCH) || defined(TARGET_RISCV64) || defined(TARGET_LOONGARCH64)
     void SetHasTailCalls()
     {
         m_gcInfoEncoder->SetHasTailCalls();
@@ -3831,8 +3819,6 @@ void GCInfo::gcInfoBlockHdrSave(GcInfoEncoder* gcInfoEncoder, unsigned methodSiz
     // Can't create tables if we've not saved code.
 
     gcInfoEncoderWithLog->SetCodeLength(methodSize);
-
-    gcInfoEncoderWithLog->SetReturnKind(getReturnKind());
 
     if (compiler->isFramePointerUsed())
     {
@@ -3974,12 +3960,12 @@ void GCInfo::gcInfoBlockHdrSave(GcInfoEncoder* gcInfoEncoder, unsigned methodSiz
     }
 #endif // TARGET_AMD64
 
-#ifdef TARGET_ARMARCH
+#if defined(TARGET_ARMARCH) || defined(TARGET_RISCV64) || defined(TARGET_LOONGARCH64)
     if (compiler->codeGen->GetHasTailCalls())
     {
         gcInfoEncoderWithLog->SetHasTailCalls();
     }
-#endif // TARGET_ARMARCH
+#endif // TARGET_ARMARCH || TARGET_RISCV64 || TARGET_LOONGARCH64
 
 #if FEATURE_FIXED_OUT_ARGS
     // outgoing stack area size
@@ -4064,14 +4050,7 @@ void GCInfo::gcMakeRegPtrTable(
 {
     GCENCODER_WITH_LOGGING(gcInfoEncoderWithLog, gcInfoEncoder);
 
-    // TODO: Decide on whether we should enable this optimization for all
-    // targets: https://github.com/dotnet/runtime/issues/103917
-#ifdef TARGET_XARCH
-    const bool noTrackedGCSlots =
-        compiler->opts.MinOpts() && !compiler->opts.jitFlags->IsSet(JitFlags::JIT_FLAG_PREJIT);
-#else
-    const bool noTrackedGCSlots = false;
-#endif
+    const bool noTrackedGCSlots = compiler->opts.MinOpts();
 
     if (mode == MAKE_REG_PTR_MODE_ASSIGN_SLOTS)
     {
